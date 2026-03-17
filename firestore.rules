@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (optional)
+    //   - email: string (required)
+    //   - phoneNumber: string (optional)
+    //   - emergencyContacts: list of maps (required)
+    //   - createdAt: string (required)
+    //
+    // Collection: alerts
+    // Document ID: {alertId}
+    // Fields:
+    //   - userId: string (required)
+    //   - userName: string (required)
+    //   - location: map {latitude: number, longitude: number} (required)
+    //   - status: string (required, enum: ['active', 'resolved'])
+    //   - timestamp: string (required)
+    //
+    // Collection: incidents
+    // Document ID: {incidentId}
+    // Fields:
+    //   - reporterId: string (required)
+    //   - type: string (required, enum: ['harassment', 'unsafe-area', 'theft', 'other'])
+    //   - description: string (required)
+    //   - location: map {latitude: number, longitude: number, address: string} (required)
+    //   - timestamp: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is string && ts.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'email', 'phoneNumber', 'emergencyContacts', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.emergencyContacts is list &&
+             data.emergencyContacts.size() <= 5 &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidAlert(data) {
+      return hasOnlyAllowedFields(['userId', 'userName', 'location', 'status', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.location.latitude is number &&
+             data.location.longitude is number &&
+             data.status in ['active', 'resolved'] &&
+             isValidTimestamp(data.timestamp);
+    }
+
+    function isValidIncident(data) {
+      return hasOnlyAllowedFields(['reporterId', 'type', 'description', 'location', 'timestamp']) &&
+             data.reporterId == request.auth.uid &&
+             data.type in ['harassment', 'unsafe-area', 'theft', 'other'] &&
+             data.description is string && data.description.size() < 2000 &&
+             data.location.latitude is number &&
+             data.location.longitude is number &&
+             isValidTimestamp(data.timestamp);
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if false; // Users cannot delete their profiles for safety audit
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAlert(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid) && isValidAlert(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid);
+    }
+
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.reporterId == request.auth.uid) && isValidIncident(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.reporterId == request.auth.uid);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

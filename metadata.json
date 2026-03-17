@@ -1,0 +1,8 @@
+{
+  "name": "Rakshak: Women's Safety & Empowerment",
+  "description": "A comprehensive safety platform for women featuring real-time SOS alerts, incident reporting, and community sensitization resources.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}
